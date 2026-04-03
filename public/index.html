@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="no">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#081120" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>OpenClaw Dashboard</title>
+    <link rel="icon" href="/public/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/public/app-icon.svg" />
+    <link rel="manifest" href="/public/site.webmanifest" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <p class="eyebrow">Local control surface</p>
+        <h1 id="dashboard-title">OpenClaw Agent Control</h1>
+        <p id="dashboard-subtitle" class="subtitle">Venter p&#229; data fra OpenClaw</p>
+      </header>
+
+      <section class="summary-bar" id="summary-bar"></section>
+      <section class="view-toggle" aria-label="Velg dashboardvisning">
+        <button class="view-toggle-button is-active" type="button" data-view-mode="scene">Scene</button>
+        <button class="view-toggle-button" type="button" data-view-mode="hierarchy">Hierarchy</button>
+      </section>
+
+      <main class="stage">
+        <div class="stage-scene" id="stage-scene">
+          <svg class="connection-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+
+          <section class="column left" id="agent-column"></section>
+
+          <section class="column center">
+            <div class="hub-wrap">
+              <div class="orbital orbital-a"></div>
+              <div class="orbital orbital-b"></div>
+              <div class="hub" id="gateway-hub">
+                <div class="hub-ring"></div>
+                <div class="hub-content">
+                  <span class="hub-kicker">Live Staff Network</span>
+                  <strong id="gateway-label">OpenClaw Working Staff</strong>
+                  <span id="gateway-status">Starting</span>
+                  <small id="gateway-detail">Dashboard initializing</small>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="column right">
+            <div class="node-stack" id="node-stack"></div>
+          </section>
+        </div>
+
+        <aside class="activity-card">
+          <div class="panel-head">
+            <h2>Recent Activity</h2>
+            <span id="updated-at">Ikke oppdatert enn&#229;</span>
+          </div>
+          <div class="activity-list" id="activity-list"></div>
+        </aside>
+      </main>
+    </div>
+
+    <template id="summary-item-template">
+      <article class="summary-item">
+        <span class="summary-dot"></span>
+        <div>
+          <span class="summary-label"></span>
+          <strong class="summary-value"></strong>
+        </div>
+      </article>
+    </template>
+
+    <template id="agent-card-template">
+      <article class="agent-card">
+        <div class="agent-head">
+          <span class="agent-dot"></span>
+          <div class="agent-heading">
+            <h2 class="agent-title"></h2>
+            <p class="agent-name"></p>
+          </div>
+          <button class="agent-chat-button" type="button"></button>
+        </div>
+        <div class="agent-presence">
+          <span class="agent-presence-emoji"></span>
+          <span class="agent-presence-text"></span>
+        </div>
+        <dl class="agent-meta">
+          <div>
+            <dt>Model</dt>
+            <dd class="agent-model"></dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd class="agent-status"></dd>
+          </div>
+          <div>
+            <dt>Last Task</dt>
+            <dd class="agent-task"></dd>
+          </div>
+          <div>
+            <dt>Schedule</dt>
+            <dd class="agent-next"></dd>
+          </div>
+        </dl>
+      </article>
+    </template>
+
+    <template id="node-template">
+      <article class="node-pill">
+        <div class="node-icon"></div>
+        <div>
+          <span class="node-kind"></span>
+          <strong class="node-title"></strong>
+          <p class="node-detail"></p>
+        </div>
+      </article>
+    </template>
+
+    <template id="activity-template">
+      <article class="activity-item">
+        <span class="activity-bullet"></span>
+        <div>
+          <strong class="activity-time"></strong>
+          <p class="activity-message"></p>
+        </div>
+      </article>
+    </template>
+
+    <div class="chat-modal-shell" id="chat-modal-shell" hidden>
+      <div class="chat-backdrop" data-close-chat="true"></div>
+      <section class="chat-modal" role="dialog" aria-modal="true" aria-labelledby="chat-modal-title">
+        <header class="chat-modal-head">
+          <div>
+            <p class="chat-modal-kicker">Agent Session</p>
+            <h2 id="chat-modal-title">Chat</h2>
+            <p class="chat-modal-subtitle" id="chat-modal-subtitle">Laster session...</p>
+          </div>
+          <button class="chat-close" id="chat-close" type="button" aria-label="Lukk chat">×</button>
+        </header>
+        <div class="chat-thread" id="chat-thread"></div>
+        <form class="chat-form" id="chat-form">
+          <textarea id="chat-input" rows="3" placeholder="Skriv melding til agenten..."></textarea>
+          <div class="chat-form-actions">
+            <span class="chat-hint" id="chat-hint">Send en melding for å vekke eller fortsette session.</span>
+            <button class="chat-send" id="chat-send" type="submit">Send</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <script src="/public/app.js"></script>
+  </body>
+</html>

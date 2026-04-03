@@ -1,0 +1,49 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000
+  },
+  "openclaw": {
+    "cliPath": "openclaw",
+    "gatewayUrl": "ws://127.0.0.1:18789",
+    "token": "SET_GATEWAY_TOKEN_HERE",
+    "timeoutMs": 5000,
+    "pollIntervalMs": 5000
+  },
+  "dashboard": {
+    "title": "OpenClaw Agent Control",
+    "subtitle": "Real-time view from OpenClaw Gateway",
+    "activityItems": 8,
+    "whatsapp": {
+      "label": "WhatsApp",
+      "cronJobIds": []
+    },
+    "agentCards": [
+      {
+        "id": "main",
+        "label": "Main Agent",
+        "name": "Primary",
+        "openclawId": "main"
+      },
+      {
+        "id": "logger",
+        "label": "Log Agent",
+        "name": "Observer",
+        "openclawId": "log",
+        "cronJobIds": []
+      },
+      {
+        "id": "marketing",
+        "label": "Marketing Agent",
+        "name": "Campaign",
+        "openclawId": "marketing"
+      },
+      {
+        "id": "developer",
+        "label": "Developer Agent",
+        "name": "Builder",
+        "openclawId": "developer"
+      }
+    ]
+  }
+}

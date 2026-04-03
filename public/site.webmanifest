@@ -1,0 +1,25 @@
+{
+  "name": "OpenClaw Dashboard",
+  "short_name": "OpenClaw",
+  "description": "Lokal kontrollflate for OpenClaw gateway, agenter, cronjobber og chat.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#040911",
+  "theme_color": "#081120",
+  "orientation": "landscape-primary",
+  "icons": [
+    {
+      "src": "/public/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/public/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
