@@ -296,3 +296,4 @@ This project fits setups where you want:
 - Dashboard behavior depends on your own OpenClaw agents, cron jobs, and transports
 - Scene and hierarchy behavior, labels, and transport mapping are driven by config plus live OpenClaw data
 
+Shared as-is. If it is useful to others, great. Bug reports and reasonable improvements are welcome, but the project follows my own use case and priorities.
