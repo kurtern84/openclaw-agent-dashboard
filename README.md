@@ -6,8 +6,6 @@ This project works as an internal control panel for agents, cron jobs, transport
 
 ## Screenshots
 
-Save screenshots in a folder such as `docs/images/` and keep the filenames below.
-
 ### Overview
 ![OpenClaw Dashboard Overview](docs/images/dashboard-overview.png)
 
