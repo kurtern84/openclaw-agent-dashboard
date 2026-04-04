@@ -188,6 +188,7 @@ function renderSummary(summary) {
     { label: "Active Agents", value: String(summary.activeAgents ?? 0), tone: "good" },
     { label: "Presence Clients", value: String(summary.presenceClients ?? 0), tone: "warn" },
     { label: "Last Cron", value: summary.lastCron || "Unknown", tone: "warn" },
+    { label: "Next Cron", value: summary.nextCron || "Unknown", tone: "warn" },
     { label: "Last Error", value: summary.lastError || "None", tone: summary.lastError && summary.lastError !== "None" ? "bad" : "good" }
   ];
 

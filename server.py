@@ -802,6 +802,13 @@ def extract_cron_jobs(cron_result):
                 "label": as_text(first_truthy(item.get("name"), item.get("label")), "Cron Job"),
                 "status": as_text(first_truthy(item.get("status"), item.get("state"), "Scheduled")),
                 "agentId": as_text(first_truthy(item.get("agentId"), item.get("agent"), schedule_obj.get("agentId")), ""),
+                "nextRunRaw": first_truthy(
+                    item.get("nextRunAt"),
+                    item.get("nextRunAtMs"),
+                    item.get("nextRun"),
+                    schedule_obj.get("at"),
+                    item.get("next"),
+                ),
                 "nextRun": compact_schedule_value(
                     first_truthy(
                         item.get("nextRunAt"),
@@ -889,6 +896,7 @@ def enrich_cron_jobs_with_runs(config, cron_jobs):
                 if isinstance(latest, dict):
                     finished_at = parse_run_timestamp(latest)
                     if finished_at:
+                        job_copy["lastRunRaw"] = finished_at
                         job_copy["lastRun"] = compact_value(finished_at, job_copy.get("lastRun") or "")
                     run_at = first_truthy(latest.get("runAtMs"), latest.get("runAt"), latest.get("ts"))
                     if run_at:
@@ -1908,11 +1916,30 @@ def build_snapshot(config):
             last_error = response.get("error")
             break
 
-    last_cron = first_truthy(
-        next((job.get("lastRun") for job in cron_jobs if job.get("lastRun")), None),
-        next((job.get("nextRun") for job in cron_jobs if job.get("nextRun")), None),
-        "No cron data",
-    )
+    last_run_raw_values = [
+        first_truthy(job.get("lastRunRaw"), job.get("runAt"), job.get("lastRun"))
+        for job in cron_jobs
+        if first_truthy(job.get("lastRunRaw"), job.get("runAt"), job.get("lastRun"))
+    ]
+    recent_cron_updates = [
+        session.get("updatedAt")
+        for session in recent_sessions.values()
+        if isinstance(session, dict) and session.get("kind") == "cron" and session.get("updatedAt")
+    ]
+    last_run_raw_values.extend(recent_cron_updates)
+    next_run_raw_values = [
+        first_truthy(job.get("nextRunRaw"), job.get("nextRun"))
+        for job in cron_jobs
+        if first_truthy(job.get("nextRunRaw"), job.get("nextRun"))
+    ]
+    latest_last_run = None
+    if last_run_raw_values:
+        latest_last_run = max(last_run_raw_values, key=lambda value: epoch_seconds(value) or 0)
+    nearest_next_run = None
+    if next_run_raw_values:
+        nearest_next_run = min(next_run_raw_values, key=lambda value: epoch_seconds(value) or float("inf"))
+    last_cron = format_elapsed_since(latest_last_run) or "No recent cron"
+    next_cron = humanize_schedule_timestamp(nearest_next_run) or "Not scheduled"
 
     mode = first_truthy(
         health_summary.get("mode"),
@@ -1935,6 +1962,7 @@ def build_snapshot(config):
             "activeAgents": len(agents_items),
             "presenceClients": len(presence_items),
             "lastCron": last_cron,
+            "nextCron": next_cron,
             "lastError": last_error or "None",
         },
         "gateway": {
@@ -1976,7 +2004,14 @@ class SnapshotStore:
         self._snapshot = {
             "updatedAt": iso_now(),
             "config": {"title": "OpenClaw Agent Control", "subtitle": "Waiting for first update"},
-            "summary": {"gatewayOnline": False, "activeAgents": 0, "presenceClients": 0, "lastCron": "Waiting", "lastError": "None"},
+            "summary": {
+                "gatewayOnline": False,
+                "activeAgents": 0,
+                "presenceClients": 0,
+                "lastCron": "Waiting",
+                "nextCron": "Waiting",
+                "lastError": "None",
+            },
             "gateway": {"label": "OpenClaw Gateway", "status": "Starting", "detail": "Dashboard booting", "host": "127.0.0.1", "url": "", "uptime": "0", "mode": "gateway"},
             "agents": [],
             "channels": [],
