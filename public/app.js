@@ -181,6 +181,26 @@ function setText(element, value, fallback = "Ikke tilgjengelig") {
   element.textContent = value || fallback;
 }
 
+function transportIconMarkup(item) {
+  const label = String(item.label || "").toLowerCase();
+  const transport = String(item.transport || "").toLowerCase();
+  if (item.kind === "whatsapp" || transport === "whatsapp" || label.includes("whatsapp")) {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12.05 3.2a8.72 8.72 0 0 0-7.51 13.16L3.2 20.8l4.56-1.3a8.72 8.72 0 1 0 4.29-16.3Zm0 1.82a6.9 6.9 0 0 1 5.91 10.47 6.9 6.9 0 0 1-7.78 3.08l-.43-.13-2.66.76.79-2.59-.15-.45a6.9 6.9 0 0 1 4.32-9.14Zm-3.2 3.45c-.23 0-.6.08-.91.42-.31.34-1.18 1.15-1.18 2.8s1.21 3.25 1.38 3.48c.17.23 2.36 3.78 5.82 5.15 2.86 1.13 3.45.9 4.08.84.63-.06 2.03-.83 2.32-1.63.29-.8.29-1.48.2-1.63-.09-.15-.34-.23-.71-.42-.37-.19-2.18-1.1-2.52-1.23-.34-.13-.59-.19-.83.19-.24.38-.94 1.23-1.15 1.48-.21.25-.42.28-.79.09-.37-.19-1.56-.58-2.97-1.84-1.1-.99-1.84-2.2-2.05-2.57-.21-.38-.02-.58.16-.77.16-.16.37-.42.56-.63.19-.21.25-.35.37-.58.12-.23.06-.44-.03-.63-.09-.19-.83-2.15-1.14-2.94-.3-.76-.6-.78-.83-.79h-.71Z"/>
+      </svg>
+    `;
+  }
+  if (transport === "telegram" || label.includes("telegram")) {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M20.67 4.34c.64-.25 1.27.29 1.1.95l-2.84 13.26c-.14.65-.86.96-1.44.62l-4.33-2.53-2.21 2.12c-.3.29-.82.11-.87-.31l-.33-3.16 7.33-6.62c.22-.2-.07-.53-.32-.37l-9.06 5.72-3.88-1.28c-.71-.23-.75-1.22-.06-1.52l16.91-6.88Z"/>
+      </svg>
+    `;
+  }
+  return "";
+}
+
 function renderSummary(summary) {
   summaryBar.innerHTML = "";
   const items = [
@@ -256,6 +276,7 @@ function renderNodes(channels, cronJobs) {
   items.forEach((item) => {
     const node = nodeTemplate.content.firstElementChild.cloneNode(true);
     node.dataset.kind = item.kind || item.accent || "channel";
+    node.dataset.transport = item.transport || "";
     node.dataset.tone = statusTone(item.status);
     node.dataset.slot = item.id || item.label.toLowerCase();
     node.dataset.agentId = item.agentId || "";
@@ -268,11 +289,15 @@ function renderNodes(channels, cronJobs) {
       item.kind === "cron" ? "Cron Job" : (item.kind === "whatsapp" || item.kind === "transport") ? "Transport" : "Channel",
       ""
     );
+    const icon = node.querySelector(".node-icon");
+    if (icon) {
+      icon.innerHTML = transportIconMarkup(item);
+    }
     setText(node.querySelector(".node-title"), item.label);
     const detail = item.kind === "cron"
       ? `${item.nextRun || "No next run"}`
-      : item.kind === "whatsapp"
-        ? `${item.status || "Unknown"}${item.detail ? ` · ${item.detail}` : ""}`
+      : (item.kind === "whatsapp" || item.kind === "transport")
+        ? `${item.status || "Unknown"}`
         : `${item.status || "Unknown"}${item.detail ? ` · ${item.detail}` : ""}`;
     setText(node.querySelector(".node-detail"), detail);
     nodeStack.appendChild(node);
