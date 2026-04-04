@@ -430,12 +430,45 @@ def format_relative_delta(target, now):
         return None
     minutes = max(delta_seconds // 60, 1)
     if minutes < 60:
-        return f"om {minutes} min"
+        return f"In {minutes} minute{'s' if minutes != 1 else ''}"
     hours = minutes // 60
     if hours < 24:
-        return f"om {hours} t"
+        return f"In {hours} hour{'s' if hours != 1 else ''}"
     days = hours // 24
-    return f"om {days} d"
+    remaining_hours = hours % 24
+    if remaining_hours:
+        return f"In {days} day{'s' if days != 1 else ''} and {remaining_hours} hour{'s' if remaining_hours != 1 else ''}"
+    return f"In {days} day{'s' if days != 1 else ''}"
+
+
+def format_elapsed_since(value, tz_name=None):
+    iso_value = format_ts(value)
+    if not iso_value:
+        return None
+    normalized = iso_value.replace("Z", "+00:00")
+    try:
+        date = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if tz_name:
+        try:
+            date = date.astimezone(ZoneInfo(tz_name))
+        except Exception:
+            date = date.astimezone()
+    else:
+        date = date.astimezone()
+    now = datetime.now(date.tzinfo)
+    delta_seconds = max(int(now.timestamp() - date.timestamp()), 0)
+    if delta_seconds < 60:
+        return "just now"
+    minutes = max(delta_seconds // 60, 1)
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = hours // 24
+    return f"{days} day{'s' if days != 1 else ''} ago"
 
 
 def humanize_schedule_timestamp(value, tz_name=None):
@@ -456,13 +489,7 @@ def humanize_schedule_timestamp(value, tz_name=None):
         date = date.astimezone()
     now = datetime.now(date.tzinfo)
     relative = format_relative_delta(date, now)
-    if date.date() == now.date():
-        base = f"I dag kl {date.strftime('%H:%M')}"
-    elif date.date() == now.date() + timedelta(days=1):
-        base = f"I morgen kl {date.strftime('%H:%M')}"
-    else:
-        base = date.strftime("%Y-%m-%d kl %H:%M")
-    return f"{base} · {relative}" if relative else base
+    return relative or date.strftime("%Y-%m-%d %H:%M")
 
 
 def compact_value(value, fallback="Unknown"):
@@ -1089,7 +1116,7 @@ def attach_agent_context(agent, cron_jobs, logs, active_sessions, recent_session
         agent["statusEmoji"] = "⚙️"
         if agent.get("lastTask") in ("No recent task", "No live metadata yet"):
             updated = session_match.get("updatedAt")
-            agent["lastTask"] = f"Active chat session{f' at {updated}' if updated else ''}"
+            agent["lastTask"] = format_elapsed_since(updated) or "Active chat session"
 
     recent_session = None
     for candidate in [openclaw_id, agent_id, label, agent_name]:
@@ -1104,9 +1131,9 @@ def attach_agent_context(agent, cron_jobs, logs, active_sessions, recent_session
     if recent_session and agent.get("lastTask") in ("No recent task", "No live metadata yet"):
         updated = recent_session.get("updatedAt")
         if recent_session.get("kind") == "cron":
-            agent["lastTask"] = f"Cron activity{f' at {updated}' if updated else ''}"
+            agent["lastTask"] = format_elapsed_since(updated) or "Recent cron activity"
         else:
-            agent["lastTask"] = f"Last chat activity{f' at {updated}' if updated else ''}"
+            agent["lastTask"] = format_elapsed_since(updated) or "Recent chat activity"
 
     for job in cron_jobs:
         haystack = canonical_name(
