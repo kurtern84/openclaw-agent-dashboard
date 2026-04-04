@@ -2,6 +2,7 @@
 import json
 import mimetypes
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -633,7 +634,7 @@ def extract_active_sessions(sessions_result, active_window_seconds=240):
             canonical_name(first_truthy(session.get("sessionKey"), session.get("key"), session.get("id"))),
         ]
         payload = {
-            "updatedAt": compact_value(updated_raw, ""),
+            "updatedAt": format_ts(updated_raw),
             "title": as_text(first_truthy(session.get("title"), session.get("name")), ""),
         }
         for candidate in key_candidates:
@@ -686,7 +687,7 @@ def extract_recent_sessions(sessions_result):
             session_type = "cron"
 
         payload = {
-            "updatedAt": compact_value(updated_raw, ""),
+            "updatedAt": format_ts(updated_raw),
             "updatedEpoch": updated_epoch,
             "key": key,
             "kind": session_type,
@@ -1398,6 +1399,79 @@ def content_to_text(value):
     return str(value)
 
 
+CHAT_PREFIX_TS_RE = re.compile(r"^\[(?P<stamp>[^\]]+)\]\s*")
+CHAT_TEXT_TS_RE = re.compile(r"\[(?P<stamp>[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}[^\]]*)\]")
+
+
+def extract_prefixed_chat_timestamp(text):
+    if not isinstance(text, str):
+        return None, text
+    match = CHAT_PREFIX_TS_RE.match(text.strip())
+    if not match:
+        return None, text
+    stamp = match.group("stamp").strip()
+    stripped = CHAT_PREFIX_TS_RE.sub("", text.strip(), count=1).strip()
+    return stamp, stripped
+
+
+def extract_inline_chat_timestamp(text):
+    raw = str(text or "")
+    if not raw:
+        return None, raw
+    match = CHAT_TEXT_TS_RE.search(raw)
+    if not match:
+        return None, raw
+    stamp = match.group("stamp").strip()
+    stripped = raw.replace(match.group(0), "").strip()
+    return stamp, stripped
+
+
+def deep_find_timestamp(value):
+    if isinstance(value, dict):
+        priority_keys = (
+            "time",
+            "ts",
+            "createdAtMs",
+            "createdAt",
+            "updatedAtMs",
+            "updatedAt",
+            "timestampMs",
+            "timestamp",
+            "date",
+        )
+        for key in priority_keys:
+            if key in value:
+                candidate = value.get(key)
+                if epoch_seconds(candidate) is not None:
+                    return candidate
+        for nested in value.values():
+            found = deep_find_timestamp(nested)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for nested in value:
+            found = deep_find_timestamp(nested)
+            if found is not None:
+                return found
+    return None
+
+
+def chat_message_timestamp(entry):
+    raw_time = first_truthy(
+        entry.get("time"),
+        entry.get("ts"),
+        entry.get("createdAtMs"),
+        entry.get("createdAt"),
+        entry.get("updatedAtMs"),
+        entry.get("updatedAt"),
+        value_at(entry, "message", "time"),
+        value_at(entry, "payload", "time"),
+        value_at(entry, "meta", "time"),
+        deep_find_timestamp(entry),
+    )
+    return (humanize_timestamp(raw_time) or compact_value(raw_time, "")), epoch_seconds(raw_time)
+
+
 def parse_transcript_messages(path):
     transcript_path = Path(path)
     if not transcript_path.exists():
@@ -1425,6 +1499,8 @@ def parse_transcript_messages(path):
                     value_at(entry, "payload", "message"),
                 )
             ).strip()
+            prefixed_time, text = extract_prefixed_chat_timestamp(text)
+            inline_time, text = extract_inline_chat_timestamp(text)
             if not role and entry.get("type") in ("user", "assistant", "system"):
                 role = entry.get("type")
             if not role:
@@ -1441,11 +1517,11 @@ def parse_transcript_messages(path):
                 {
                     "role": role,
                     "text": text,
-                    "time": compact_value(first_truthy(entry.get("time"), entry.get("ts"), entry.get("createdAt"), entry.get("updatedAt")), ""),
-                    "sortTs": epoch_seconds(first_truthy(entry.get("time"), entry.get("ts"), entry.get("createdAt"), entry.get("updatedAt"))),
+                    "time": prefixed_time or inline_time or chat_message_timestamp(entry)[0],
+                    "sortTs": chat_message_timestamp(entry)[1],
                 }
             )
-    return messages[-80:]
+    return ensure_chat_message_times(messages[-80:])
 
 
 def normalize_message_order(messages):
@@ -1477,6 +1553,20 @@ def merge_chat_messages(primary, secondary):
     return merged[-80:]
 
 
+def ensure_chat_message_times(messages):
+    normalized = []
+    for message in normalize_list(messages):
+        if not isinstance(message, dict):
+            continue
+        item = dict(message)
+        if not item.get("time"):
+            sort_ts = item.get("sortTs")
+            if sort_ts is not None:
+                item["time"] = humanize_timestamp(sort_ts) or ""
+        normalized.append(item)
+    return normalized
+
+
 def get_cached_chat(agent_key):
     with CHAT_CACHE_LOCK:
         return dict(CHAT_CACHE.get(agent_key) or {})
@@ -1499,6 +1589,7 @@ def build_agent_chat_payload(config, agent_token, fresh=False):
     cached_payload = cached_chat.get("payload") if isinstance(cached_chat, dict) else {}
     if not fresh and isinstance(cached_payload, dict) and cached_payload.get("messages"):
         payload = dict(cached_payload)
+        payload["messages"] = ensure_chat_message_times(payload.get("messages", []))
         payload["agent"] = agent_ref
         return payload
     sessions = load_agent_sessions(config, agent_ref, fresh=fresh, include_local=False)
@@ -1532,18 +1623,20 @@ def build_agent_chat_payload(config, agent_token, fresh=False):
                         value_at(row, "payload", "message"),
                     )
                 ).strip()
+                prefixed_time, text = extract_prefixed_chat_timestamp(text)
+                inline_time, text = extract_inline_chat_timestamp(text)
                 if not text:
                     continue
-                raw_time = first_truthy(row.get("time"), row.get("ts"), row.get("createdAt"), row.get("updatedAt"))
+                display_time, sort_ts = chat_message_timestamp(row)
                 normalized.append(
                     {
                         "role": role,
                         "text": text,
-                        "time": compact_value(raw_time, ""),
-                        "sortTs": epoch_seconds(raw_time),
+                        "time": prefixed_time or inline_time or display_time,
+                        "sortTs": sort_ts,
                     }
                 )
-            gateway_messages = normalized
+            gateway_messages = ensure_chat_message_times(normalized)
     transcript_session = session
     if not gateway_messages:
         local_sessions = load_agent_sessions(config, agent_ref, fresh=False, include_local=True)
@@ -1559,7 +1652,7 @@ def build_agent_chat_payload(config, agent_token, fresh=False):
         transcript_session.get("file") if isinstance(transcript_session, dict) else None,
     )
     transcript_messages = parse_transcript_messages(transcript_path) if transcript_path else []
-    messages = gateway_messages if gateway_messages else transcript_messages
+    messages = ensure_chat_message_times(gateway_messages if gateway_messages else transcript_messages)
     payload = {
         "agent": agent_ref,
         "sessionId": as_text(first_truthy(session.get("id"), session.get("sessionId")), "") if isinstance(session, dict) else "",
@@ -1744,6 +1837,18 @@ def build_activity_bundle(config):
     }
 
 
+def build_sessions_history_bundle(config):
+    sessions_ttl = refresh_seconds(config, "sessionsHistory", 45000)
+    sessions = cached_openclaw_command(
+        config,
+        "sessions.all",
+        ["sessions", "--all-agents", "--json"],
+        ttl_seconds=sessions_ttl,
+        include_remote=False,
+    )
+    return {"sessions": sessions}
+
+
 def build_snapshot(config):
     previous_snapshot = STORE.get() if "STORE" in globals() else {}
     live_bundle = section_value(
@@ -1766,6 +1871,11 @@ def build_snapshot(config):
         refresh_seconds(config, "activity", 20000),
         lambda _previous: build_activity_bundle(config),
     )
+    sessions_history_bundle = section_value(
+        "bundle:sessions-history",
+        refresh_seconds(config, "sessionsHistory", 45000),
+        lambda _previous: build_sessions_history_bundle(config),
+    )
 
     health = live_bundle.get("health", {})
     status = live_bundle.get("status", {})
@@ -1774,6 +1884,7 @@ def build_snapshot(config):
     cron = cron_bundle.get("cron", {})
     agents = agents_bundle.get("agents", {})
     logs = activity_bundle.get("logs", {})
+    sessions_history = sessions_history_bundle.get("sessions", {})
 
     health_data = health.get("data") if isinstance(health, dict) and health.get("ok") else {}
     status_data = status.get("data") if isinstance(status, dict) and status.get("ok") else {}
@@ -1781,7 +1892,9 @@ def build_snapshot(config):
     activity_items = normalize_list(activity_bundle.get("activity") or [])
     active_window_seconds = 240
     active_sessions = extract_active_sessions(sessions.get("data") if isinstance(sessions, dict) and sessions.get("ok") else [], active_window_seconds=active_window_seconds)
-    recent_sessions = {}
+    recent_sessions = extract_recent_sessions(
+        sessions_history.get("data") if isinstance(sessions_history, dict) and sessions_history.get("ok") else []
+    )
     agents_items = extract_agents(config, agents.get("data") if agents.get("ok") else [], cron_jobs, activity_items, active_sessions, recent_sessions)
     merge_agent_history(value_at(previous_snapshot, "agents") or [], agents_items)
     channels = augment_channels_with_transports(config, extract_channels(health_data), cron_jobs)

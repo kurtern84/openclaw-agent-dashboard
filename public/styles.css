@@ -812,6 +812,13 @@ body::before {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.chat-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .chat-message[data-role="user"] {
   margin-left: auto;
   background: rgba(107, 221, 255, 0.12);
@@ -844,6 +851,8 @@ body::before {
 .chat-time {
   color: var(--muted);
   font-size: 0.76rem;
+  white-space: nowrap;
+  opacity: 0.9;
 }
 
 .chat-form {

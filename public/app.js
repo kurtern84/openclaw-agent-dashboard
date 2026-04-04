@@ -1082,6 +1082,34 @@ function stopDrag() {
   stageEl.classList.remove("is-dragging");
 }
 
+function extractInlineChatTimestamp(text) {
+  const raw = String(text || "");
+  if (!raw) return { time: "", text: "" };
+  const lines = raw.split("\n");
+  const timeIndex = lines.findIndex((line) => /^\[[^\]]+\]\s*$/.test(line.trim()));
+  if (timeIndex === -1) {
+    return { time: "", text: raw };
+  }
+  const time = lines[timeIndex].trim().replace(/^\[|\]$/g, "");
+  const cleaned = lines.filter((_, index) => index !== timeIndex).join("\n").trim();
+  return { time, text: cleaned };
+}
+
+function formatChatTimestamp(message) {
+  if (message?.time) return message.time;
+  const text = String(message?.text || "");
+  const extracted = extractInlineChatTimestamp(text);
+  if (extracted.time) return extracted.time;
+  const sortTs = Number(message?.sortTs);
+  if (!Number.isFinite(sortTs) || sortTs <= 0) return "";
+  const date = new Date(sortTs * 1000);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("no-NO", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
 function renderChatMessages(messages) {
   chatThread.innerHTML = "";
   if (!messages.length) {
@@ -1096,20 +1124,25 @@ function renderChatMessages(messages) {
     const node = document.createElement("article");
     node.className = "chat-message";
     node.dataset.role = message.role || "system";
+    const meta = document.createElement("div");
+    meta.className = "chat-meta";
     const role = document.createElement("span");
     role.className = "chat-role";
     role.textContent = message.role || "system";
-    const text = document.createElement("p");
-    text.className = "chat-text";
-    text.textContent = message.text || "";
-    node.appendChild(role);
-    node.appendChild(text);
-    if (message.time) {
+    meta.appendChild(role);
+    const displayTime = formatChatTimestamp(message);
+    if (displayTime) {
       const time = document.createElement("span");
       time.className = "chat-time";
-      time.textContent = message.time;
-      node.appendChild(time);
+      time.textContent = displayTime;
+      meta.appendChild(time);
     }
+    const text = document.createElement("p");
+    text.className = "chat-text";
+    const extracted = extractInlineChatTimestamp(message.text || "");
+    text.textContent = extracted.text || String(message.text || "");
+    node.appendChild(meta);
+    node.appendChild(text);
     chatThread.appendChild(node);
   });
   chatThread.scrollTop = chatThread.scrollHeight;
