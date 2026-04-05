@@ -97,6 +97,15 @@ def extract_cron_jobs(cron_result):
                 "label": _as_text(_first_truthy(item.get("name"), item.get("label")), "Cron Job"),
                 "status": _as_text(_first_truthy(item.get("status"), item.get("state"), "Scheduled")),
                 "agentId": _as_text(_first_truthy(item.get("agentId"), item.get("agent"), schedule_obj.get("agentId")), ""),
+                "scheduleExpr": _as_text(
+                    _first_truthy(
+                        schedule_obj.get("cron"),
+                        schedule_obj.get("expr"),
+                        item.get("cron"),
+                        item.get("expr"),
+                    ),
+                    "",
+                ),
                 "nextRunRaw": _first_truthy(
                     item.get("nextRunAt"),
                     item.get("nextRunAtMs"),
@@ -208,6 +217,7 @@ def enrich_cron_jobs_with_runs(config, cron_jobs):
                         job_copy["lastRun"] = compact_value(finished_at, job_copy.get("lastRun") or "")
                     run_at = _first_truthy(latest.get("runAtMs"), latest.get("runAt"), latest.get("ts"))
                     if run_at:
+                        job_copy["runAtRaw"] = run_at
                         job_copy["runAt"] = compact_value(run_at, "")
                     action = _as_text(_first_truthy(latest.get("action"), latest.get("status")), "")
                     status = _as_text(latest.get("status"), "")

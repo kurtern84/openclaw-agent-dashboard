@@ -320,11 +320,9 @@ def attach_agent_context(agent, cron_jobs, logs, active_sessions, recent_session
             job_model = _as_text(_first_truthy(job.get("model"), job.get("provider")), "")
             if job_model:
                 agent["model"] = job_model
-            when = _first_truthy(job.get("lastRun"), job.get("runAt"))
+            when = _first_truthy(job.get("lastRunRaw"), job.get("runAtRaw"), job.get("runAt"), job.get("lastRun"))
             if when:
-                action = job.get("runAction") or "finished"
-                status = job.get("runStatus") or "ok"
-                agent["lastTask"] = f"Cron {action} {when} ({status})"
+                agent["lastTask"] = format_elapsed_since(when) or _as_text(when, agent.get("lastTask", "No recent task"))
             break
     for entry in logs:
         haystack = _canonical_name(f"{entry.get('message', '')} {entry.get('subsystem', '')}")

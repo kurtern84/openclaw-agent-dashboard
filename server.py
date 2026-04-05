@@ -500,17 +500,28 @@ def build_snapshot(config):
             last_error = response.get("error")
             break
 
-    last_run_raw_values = [
-        first_truthy(job.get("lastRunRaw"), job.get("runAt"), job.get("lastRun"))
-        for job in cron_jobs
-        if first_truthy(job.get("lastRunRaw"), job.get("runAt"), job.get("lastRun"))
-    ]
-    last_run_raw_values.extend(recent_cron_session_updates)
-    next_run_raw_values = [
-        first_truthy(job.get("nextRunRaw"), job.get("nextRun"))
-        for job in cron_jobs
-        if first_truthy(job.get("nextRunRaw"), job.get("nextRun"))
-    ]
+    last_run_raw_values = []
+    for job in cron_jobs:
+        candidate = first_truthy(job.get("lastRunRaw"), job.get("runAtRaw"), job.get("runAt"), job.get("lastRun"))
+        if candidate and epoch_seconds(candidate) is not None:
+            last_run_raw_values.append(candidate)
+    last_run_raw_values.extend(value for value in recent_cron_session_updates if epoch_seconds(value) is not None)
+    last_run_raw_values.extend(
+        session.get("updatedAt")
+        for session in recent_sessions.values()
+        if isinstance(session, dict) and session.get("kind") == "cron" and epoch_seconds(session.get("updatedAt")) is not None
+    )
+    next_run_raw_values = []
+    for job in cron_jobs:
+        candidate = first_truthy(job.get("nextRunRaw"), job.get("nextRun"))
+        if candidate and epoch_seconds(candidate) is not None:
+            next_run_raw_values.append(candidate)
+            continue
+        expr = as_text(job.get("scheduleExpr"), "")
+        if expr:
+            derived_next = compute_next_run_from_expr(expr)
+            if derived_next and epoch_seconds(derived_next) is not None:
+                next_run_raw_values.append(derived_next)
     latest_last_run = None
     if last_run_raw_values:
         latest_last_run = max(last_run_raw_values, key=lambda value: epoch_seconds(value) or 0)
