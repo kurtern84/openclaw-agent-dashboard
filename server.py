@@ -664,10 +664,16 @@ def extract_recent_sessions(sessions_result):
         updated_raw = first_truthy(
             session.get("updatedAt"),
             session.get("updatedAtMs"),
+            session.get("createdAt"),
+            session.get("createdAtMs"),
             session.get("lastMessageAt"),
             session.get("lastMessageAtMs"),
             session.get("ts"),
             session.get("time"),
+            value_at(session, "meta", "updatedAt"),
+            value_at(session, "meta", "updatedAtMs"),
+            value_at(session, "meta", "createdAt"),
+            value_at(session, "meta", "createdAtMs"),
         )
         updated_epoch = epoch_seconds(updated_raw)
         if updated_epoch is None:
@@ -697,6 +703,46 @@ def extract_recent_sessions(sessions_result):
         if not previous or updated_epoch > previous.get("updatedEpoch", 0):
             recent[agent_id] = payload
     return recent
+
+
+def extract_recent_cron_session_updates(sessions_result):
+    sessions = []
+    if isinstance(sessions_result, dict):
+        sessions = normalize_list(
+            first_truthy(
+                sessions_result.get("sessions"),
+                sessions_result.get("items"),
+                sessions_result.get("entries"),
+                sessions_result,
+            )
+        )
+    elif isinstance(sessions_result, list):
+        sessions = sessions_result
+
+    updates = []
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        key = as_text(first_truthy(session.get("sessionKey"), session.get("key")), "")
+        if not (":cron:" in key or key.startswith("cron:")):
+            continue
+        updated_raw = first_truthy(
+            session.get("updatedAt"),
+            session.get("updatedAtMs"),
+            session.get("createdAt"),
+            session.get("createdAtMs"),
+            session.get("lastMessageAt"),
+            session.get("lastMessageAtMs"),
+            session.get("ts"),
+            session.get("time"),
+            value_at(session, "meta", "updatedAt"),
+            value_at(session, "meta", "updatedAtMs"),
+            value_at(session, "meta", "createdAt"),
+            value_at(session, "meta", "createdAtMs"),
+        )
+        if updated_raw and epoch_seconds(updated_raw) is not None:
+            updates.append(format_ts(updated_raw))
+    return updates
 
 
 def extract_health_summary(health):
@@ -838,14 +884,27 @@ def parse_run_timestamp(run):
     return first_truthy(
         run.get("runAtMs"),
         run.get("runAt"),
+        run.get("updatedAtMs"),
+        run.get("updatedAt"),
+        run.get("createdAtMs"),
+        run.get("createdAt"),
         run.get("endedAt"),
         run.get("finishedAt"),
         run.get("completedAt"),
         run.get("startedAt"),
         run.get("time"),
         run.get("ts"),
+        value_at(run, "meta", "updatedAt"),
+        value_at(run, "meta", "updatedAtMs"),
+        value_at(run, "meta", "createdAt"),
+        value_at(run, "meta", "createdAtMs"),
         value_at(run, "result", "endedAt"),
         value_at(run, "result", "finishedAt"),
+        value_at(run, "result", "completedAt"),
+        value_at(run, "result", "updatedAt"),
+        value_at(run, "result", "updatedAtMs"),
+        value_at(run, "result", "createdAt"),
+        value_at(run, "result", "createdAtMs"),
     )
 
 
@@ -1903,6 +1962,9 @@ def build_snapshot(config):
     recent_sessions = extract_recent_sessions(
         sessions_history.get("data") if isinstance(sessions_history, dict) and sessions_history.get("ok") else []
     )
+    recent_cron_session_updates = extract_recent_cron_session_updates(
+        sessions_history.get("data") if isinstance(sessions_history, dict) and sessions_history.get("ok") else []
+    )
     agents_items = extract_agents(config, agents.get("data") if agents.get("ok") else [], cron_jobs, activity_items, active_sessions, recent_sessions)
     merge_agent_history(value_at(previous_snapshot, "agents") or [], agents_items)
     channels = augment_channels_with_transports(config, extract_channels(health_data), cron_jobs)
@@ -1921,12 +1983,7 @@ def build_snapshot(config):
         for job in cron_jobs
         if first_truthy(job.get("lastRunRaw"), job.get("runAt"), job.get("lastRun"))
     ]
-    recent_cron_updates = [
-        session.get("updatedAt")
-        for session in recent_sessions.values()
-        if isinstance(session, dict) and session.get("kind") == "cron" and session.get("updatedAt")
-    ]
-    last_run_raw_values.extend(recent_cron_updates)
+    last_run_raw_values.extend(recent_cron_session_updates)
     next_run_raw_values = [
         first_truthy(job.get("nextRunRaw"), job.get("nextRun"))
         for job in cron_jobs
