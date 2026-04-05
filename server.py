@@ -3,15 +3,32 @@ import json
 import mimetypes
 import queue
 import re
-import subprocess
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from zoneinfo import ZoneInfo
+
+from openclaw_client import (
+    cached_openclaw_command,
+    gateway_call,
+    maybe_cached_command,
+    parse_json_payload,
+    run_openclaw_command,
+)
+from time_utils import (
+    compact_schedule_value,
+    compact_value,
+    compute_next_run_from_expr,
+    epoch_seconds,
+    format_cron_expr,
+    format_elapsed_since,
+    format_ts,
+    humanize_schedule_timestamp,
+    humanize_timestamp,
+)
 
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("image/svg+xml", ".svg")
@@ -20,12 +37,8 @@ mimetypes.add_type("image/svg+xml", ".svg")
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
 CONFIG_PATH = BASE_DIR / "config.json"
-COMMAND_CACHE = {}
-COMMAND_CACHE_LOCK = threading.Lock()
 CHAT_CACHE = {}
 CHAT_CACHE_LOCK = threading.Lock()
-CRON_NEXT_CACHE = {}
-CRON_NEXT_CACHE_LOCK = threading.Lock()
 SECTION_CACHE = {}
 SECTION_CACHE_LOCK = threading.Lock()
 
@@ -127,120 +140,6 @@ def first_truthy(*values):
     return None
 
 
-def parse_json_payload(text):
-    decoder = json.JSONDecoder()
-    stripped = (text or "").strip()
-    if not stripped:
-        raise json.JSONDecodeError("empty input", stripped, 0)
-
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        pass
-
-    for marker in ("{", "["):
-        start = stripped.find(marker)
-        while start != -1:
-            try:
-                payload, _ = decoder.raw_decode(stripped[start:])
-                return payload
-            except json.JSONDecodeError:
-                start = stripped.find(marker, start + 1)
-    raise json.JSONDecodeError("no json payload found", stripped, 0)
-
-
-def run_openclaw_command(config, subcommand, include_remote=True, timeout_override_ms=None):
-    openclaw = config["openclaw"]
-    cli_path = openclaw.get("cliPath", "openclaw")
-    timeout_ms = int(timeout_override_ms or openclaw.get("timeoutMs", 5000))
-    command = [cli_path] + subcommand
-
-    if include_remote:
-        gateway_url = openclaw.get("gatewayUrl")
-        token = openclaw.get("token")
-        if gateway_url:
-            command.extend(["--url", gateway_url])
-        if token:
-            command.extend(["--token", token])
-        if "--timeout" not in subcommand:
-            command.extend(["--timeout", str(timeout_ms)])
-
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=max(timeout_ms / 1000.0, 1.0),
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        return {"ok": False, "error": f"Fant ikke OpenClaw CLI: {cli_path}", "detail": str(exc)}
-    except subprocess.TimeoutExpired as exc:
-        partial_stdout = (exc.stdout or "").strip() if isinstance(exc.stdout, str) else ""
-        partial_payload = None
-        if partial_stdout:
-            try:
-                partial_payload = parse_json_payload(partial_stdout)
-            except json.JSONDecodeError:
-                partial_payload = partial_stdout
-        return {
-            "ok": False,
-            "error": "Tidsavbrudd mot OpenClaw CLI",
-            "timedOut": True,
-            "data": partial_payload,
-        }
-
-    if result.returncode != 0:
-        stderr = (result.stderr or result.stdout or "").strip()
-        return {"ok": False, "error": stderr or f"OpenClaw returnerte exit-kode {result.returncode}"}
-
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return {"ok": True, "data": None}
-
-    try:
-        return {"ok": True, "data": parse_json_payload(stdout)}
-    except json.JSONDecodeError:
-        return {"ok": True, "data": stdout}
-
-
-def cached_openclaw_command(config, cache_key, subcommand, ttl_seconds, include_remote=True):
-    now = time.time()
-    with COMMAND_CACHE_LOCK:
-        entry = COMMAND_CACHE.get(cache_key)
-        if entry and now - entry.get("ts", 0) < ttl_seconds:
-            return entry.get("value")
-    value = run_openclaw_command(config, subcommand, include_remote=include_remote)
-    with COMMAND_CACHE_LOCK:
-        COMMAND_CACHE[cache_key] = {"ts": now, "value": value}
-    return value
-
-
-def gateway_call(config, method, params):
-    result = run_openclaw_command(
-        config,
-        ["gateway", "call", method, "--params", json.dumps(params), "--json"],
-        include_remote=True,
-    )
-    if not result.get("ok"):
-        return result
-    payload = result.get("data")
-    if isinstance(payload, dict) and "result" in payload:
-        return {"ok": True, "data": payload.get("result")}
-    return result
-
-
-def maybe_cached_command(config, cache_key, subcommand, ttl_seconds, include_remote=True, fresh=False, timeout_override_ms=None):
-    if fresh:
-        return run_openclaw_command(
-            config,
-            subcommand,
-            include_remote=include_remote,
-            timeout_override_ms=timeout_override_ms,
-        )
-    return cached_openclaw_command(config, cache_key, subcommand, ttl_seconds, include_remote=include_remote)
-
-
 def section_value(name, min_interval_seconds, builder):
     now = time.time()
     with SECTION_CACHE_LOCK:
@@ -265,320 +164,6 @@ def as_text(value, fallback="Unknown"):
     if isinstance(value, bool):
         return "Yes" if value else "No"
     if isinstance(value, (dict, list)):
-        return compact_value(value, fallback=fallback)
-    return str(value)
-
-
-def format_ts(value):
-    if value in (None, ""):
-        return None
-    if isinstance(value, (int, float)):
-        if value > 10_000_000_000:
-            value = value / 1000.0
-        return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
-    if isinstance(value, str):
-        return value
-    return None
-
-
-def epoch_seconds(value):
-    iso_value = format_ts(value)
-    if not iso_value:
-        return None
-    if isinstance(value, (int, float)):
-        if value > 10_000_000_000:
-            return value / 1000.0
-        return float(value)
-    normalized = str(iso_value).replace("Z", "+00:00")
-    try:
-        return datetime.fromisoformat(normalized).timestamp()
-    except ValueError:
-        return None
-
-
-def format_cron_expr(expr):
-    if not expr or not isinstance(expr, str):
-        return None
-    parts = expr.split()
-    if len(parts) < 2:
-        return expr
-    minute, hour = parts[0], parts[1]
-    if minute.isdigit() and hour.isdigit():
-        return f"{int(hour):02d}:{int(minute):02d}"
-    return expr
-
-
-def parse_cron_field(field, minimum, maximum, allow_wrap=False):
-    if not isinstance(field, str) or not field.strip():
-        return None
-    values = set()
-    for part in field.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        step = 1
-        if "/" in part:
-            base, step_str = part.split("/", 1)
-            if not step_str.isdigit():
-                return None
-            step = int(step_str)
-            part = base or "*"
-        if part == "*":
-            start, end = minimum, maximum
-        elif "-" in part:
-            start_str, end_str = part.split("-", 1)
-            if not (start_str.strip("-").isdigit() and end_str.strip("-").isdigit()):
-                return None
-            start, end = int(start_str), int(end_str)
-        else:
-            if not part.strip("-").isdigit():
-                return None
-            start = end = int(part)
-        if allow_wrap:
-            if start == 7:
-                start = 0
-            if end == 7:
-                end = 0
-        if start < minimum or start > maximum or end < minimum or end > maximum:
-            return None
-        if start <= end:
-            values.update(range(start, end + 1, step))
-        else:
-            values.update(range(start, maximum + 1, step))
-            values.update(range(minimum, end + 1, step))
-    return values
-
-
-def cron_matches(expr, candidate):
-    if not isinstance(expr, str):
-        return False
-    parts = expr.split()
-    if len(parts) != 5:
-        return False
-    minute_vals = parse_cron_field(parts[0], 0, 59)
-    hour_vals = parse_cron_field(parts[1], 0, 23)
-    day_vals = parse_cron_field(parts[2], 1, 31)
-    month_vals = parse_cron_field(parts[3], 1, 12)
-    dow_vals = parse_cron_field(parts[4], 0, 6, allow_wrap=True)
-    if None in (minute_vals, hour_vals, day_vals, month_vals, dow_vals):
-        return False
-    python_dow = (candidate.weekday() + 1) % 7
-    return (
-        candidate.minute in minute_vals
-        and candidate.hour in hour_vals
-        and candidate.day in day_vals
-        and candidate.month in month_vals
-        and python_dow in dow_vals
-    )
-
-
-def compute_next_run_from_expr(expr, tz_name=None):
-    if not isinstance(expr, str) or len(expr.split()) != 5:
-        return None
-    now = datetime.now(ZoneInfo(tz_name)) if tz_name else datetime.now().astimezone()
-    current = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
-    cache_key = f"{tz_name or current.tzinfo}|{expr}|{current.strftime('%Y%m%d%H%M')}"
-    with CRON_NEXT_CACHE_LOCK:
-        cached = CRON_NEXT_CACHE.get(cache_key)
-        if cached:
-            return cached
-    for _ in range(0, 60 * 24 * 370):
-        if cron_matches(expr, current):
-            result = current.isoformat()
-            with CRON_NEXT_CACHE_LOCK:
-                CRON_NEXT_CACHE.clear()
-                CRON_NEXT_CACHE[cache_key] = result
-            return result
-        current += timedelta(minutes=1)
-    return None
-
-
-def dedupe_datetime_suffix(text):
-    if not isinstance(text, str):
-        return text
-    parts = [part.strip() for part in text.split("·")]
-    if len(parts) == 2 and parts[0].endswith(parts[1]):
-        return parts[0]
-    return text
-
-
-def humanize_timestamp(value, tz_name=None):
-    iso_value = format_ts(value)
-    if not iso_value:
-        return None
-    normalized = iso_value.replace("Z", "+00:00")
-    try:
-        date = datetime.fromisoformat(normalized)
-    except ValueError:
-        return iso_value
-    if tz_name:
-        try:
-            date = date.astimezone(ZoneInfo(tz_name))
-        except Exception:
-            date = date.astimezone()
-    else:
-        date = date.astimezone()
-    now = datetime.now(date.tzinfo)
-    same_day = date.date() == now.date()
-    if same_day:
-        return date.strftime("%H:%M")
-    return date.strftime("%Y-%m-%d kl %H:%M")
-
-
-def format_relative_delta(target, now):
-    delta_seconds = int(target.timestamp() - now.timestamp())
-    if delta_seconds <= 0:
-        return None
-    minutes = max(delta_seconds // 60, 1)
-    if minutes < 60:
-        return f"In {minutes} minute{'s' if minutes != 1 else ''}"
-    hours = minutes // 60
-    if hours < 24:
-        return f"In {hours} hour{'s' if hours != 1 else ''}"
-    days = hours // 24
-    remaining_hours = hours % 24
-    if remaining_hours:
-        return f"In {days} day{'s' if days != 1 else ''} and {remaining_hours} hour{'s' if remaining_hours != 1 else ''}"
-    return f"In {days} day{'s' if days != 1 else ''}"
-
-
-def format_elapsed_since(value, tz_name=None):
-    iso_value = format_ts(value)
-    if not iso_value:
-        return None
-    normalized = iso_value.replace("Z", "+00:00")
-    try:
-        date = datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
-    if tz_name:
-        try:
-            date = date.astimezone(ZoneInfo(tz_name))
-        except Exception:
-            date = date.astimezone()
-    else:
-        date = date.astimezone()
-    now = datetime.now(date.tzinfo)
-    delta_seconds = max(int(now.timestamp() - date.timestamp()), 0)
-    if delta_seconds < 60:
-        return "just now"
-    minutes = max(delta_seconds // 60, 1)
-    if minutes < 60:
-        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-    hours = minutes // 60
-    if hours < 24:
-        return f"{hours} hour{'s' if hours != 1 else ''} ago"
-    days = hours // 24
-    return f"{days} day{'s' if days != 1 else ''} ago"
-
-
-def humanize_schedule_timestamp(value, tz_name=None):
-    iso_value = format_ts(value)
-    if not iso_value:
-        return None
-    normalized = iso_value.replace("Z", "+00:00")
-    try:
-        date = datetime.fromisoformat(normalized)
-    except ValueError:
-        return iso_value
-    if tz_name:
-        try:
-            date = date.astimezone(ZoneInfo(tz_name))
-        except Exception:
-            date = date.astimezone()
-    else:
-        date = date.astimezone()
-    now = datetime.now(date.tzinfo)
-    relative = format_relative_delta(date, now)
-    return relative or date.strftime("%Y-%m-%d %H:%M")
-
-
-def compact_value(value, fallback="Unknown"):
-    if value in (None, "", [], {}):
-        return fallback
-    if isinstance(value, str):
-        return dedupe_datetime_suffix(format_cron_expr(value) or value)
-    if isinstance(value, (int, float)):
-        return humanize_timestamp(value) or str(value)
-    if isinstance(value, list):
-        compact = [compact_value(item, fallback="") for item in value[:3]]
-        compact = [item for item in compact if item]
-        deduped = []
-        for item in compact:
-            if item not in deduped:
-                deduped.append(item)
-        compact = deduped
-        return dedupe_datetime_suffix(" · ".join(compact)) if compact else fallback
-    if isinstance(value, dict):
-        for key in ("nextRunAtMs", "nextRunMs", "runAtMs", "timestampMs"):
-            if key in value:
-                stamp = humanize_timestamp(value.get(key), value.get("tz"))
-                if stamp:
-                    expr = format_cron_expr(first_truthy(value.get("expr"), value.get("cron")))
-                    if expr and stamp.endswith(expr):
-                        return stamp
-                    return dedupe_datetime_suffix(stamp)
-        for key in ("nextRunAt", "nextRun", "runAt", "timestamp", "time"):
-            if key in value:
-                stamp = humanize_timestamp(value.get(key), value.get("tz")) or str(value.get(key))
-                if stamp:
-                    expr = format_cron_expr(first_truthy(value.get("expr"), value.get("cron")))
-                    if expr and stamp.endswith(expr):
-                        return stamp
-                    return dedupe_datetime_suffix(stamp)
-        for key in ("label", "name", "message", "text", "expr", "cron", "schedule"):
-            if value.get(key):
-                return compact_value(value.get(key), fallback=fallback)
-        parts = []
-        for key in ("kind", "state", "status", "tz"):
-            if value.get(key):
-                parts.append(str(value.get(key)))
-        return dedupe_datetime_suffix(" · ".join(parts)) if parts else fallback
-    return str(value)
-
-
-def compact_schedule_value(value, fallback="Unknown"):
-    if value in (None, "", [], {}):
-        return fallback
-    if isinstance(value, str):
-        next_from_expr = compute_next_run_from_expr(value)
-        if next_from_expr:
-            formatted = humanize_schedule_timestamp(next_from_expr)
-            if formatted:
-                return formatted
-        parsed_epoch = epoch_seconds(value)
-        if parsed_epoch is not None:
-            formatted = humanize_schedule_timestamp(parsed_epoch)
-            if formatted:
-                return formatted
-        return dedupe_datetime_suffix(format_cron_expr(value) or value)
-    if isinstance(value, (int, float)):
-        return humanize_schedule_timestamp(value) or str(value)
-    if isinstance(value, list):
-        compact = [compact_schedule_value(item, fallback="") for item in value[:3]]
-        compact = [item for item in compact if item]
-        return dedupe_datetime_suffix(" · ".join(compact)) if compact else fallback
-    if isinstance(value, dict):
-        for key in ("nextRunAtMs", "nextRunMs", "runAtMs", "timestampMs"):
-            if key in value:
-                stamp = humanize_schedule_timestamp(value.get(key), value.get("tz"))
-                if stamp:
-                    return dedupe_datetime_suffix(stamp)
-        for key in ("nextRunAt", "nextRun", "runAt", "timestamp", "time"):
-            if key in value:
-                stamp = humanize_schedule_timestamp(value.get(key), value.get("tz")) or str(value.get(key))
-                if stamp:
-                    return dedupe_datetime_suffix(stamp)
-        expr = first_truthy(value.get("expr"), value.get("cron"))
-        if expr:
-            next_from_expr = compute_next_run_from_expr(str(expr), value.get("tz"))
-            if next_from_expr:
-                stamp = humanize_schedule_timestamp(next_from_expr, value.get("tz"))
-                if stamp:
-                    return dedupe_datetime_suffix(stamp)
-        for key in ("label", "name", "message", "text", "expr", "cron", "schedule"):
-            if value.get(key):
-                return compact_schedule_value(value.get(key), fallback=fallback)
         return compact_value(value, fallback=fallback)
     return str(value)
 
