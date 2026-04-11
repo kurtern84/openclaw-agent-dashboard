@@ -70,14 +70,14 @@ DEFAULT_CONFIG = {
         "gatewayUrl": "ws://127.0.0.1:18789",
         "token": "",
         "timeoutMs": 5000,
-        "pollIntervalMs": 15000,
+        "pollIntervalMs": 20000,
         "refreshMs": {
-            "live": 15000,
+            "live": 20000,
             "presence": 60000,
-            "activeSessions": 10000,
-            "activity": 20000,
-            "sessionsHistory": 45000,
-            "cronMetadata": 90000,
+            "activeSessions": 60000,
+            "activity": 120000,
+            "sessionsHistory": 180000,
+            "cronMetadata": 180000,
             "agentsMetadata": 120000,
             "cronRuns": 180000,
         },
@@ -370,22 +370,20 @@ def fallback_activity(gateway_online, channels, cron_jobs, agents_items):
 
 
 def build_live_bundle(config):
-    live_ttl = refresh_seconds(config, "live", 15000)
-    active_sessions_ttl = refresh_seconds(config, "activeSessions", 10000)
+    live_ttl = refresh_seconds(config, "live", 20000)
 
     health = cached_openclaw_command(config, "health", ["health", "--json"], ttl_seconds=live_ttl)
-    status = cached_openclaw_command(config, "status", ["status", "--json"], ttl_seconds=live_ttl)
+    # Keep status out of the live polling path as well. Health is enough for
+    # the dashboard's core gateway-online signal, and status appears to be one
+    # of the last recurring CLI calls still spawning hot openclaw processes.
+    status = {"ok": True, "data": {}}
     # Presence is best-effort only. On this machine the `openclaw system`
     # subprocess appears to be the main CPU/temperature offender, so keep
     # presence disabled in the live path and fall back to an empty list.
     presence = {"ok": True, "data": []}
-    sessions = cached_openclaw_command(
-        config,
-        "sessions.active",
-        ["sessions", "--all-agents", "--active", "240", "--json"],
-        ttl_seconds=active_sessions_ttl,
-        include_remote=False,
-    )
+    # sessions --active is the most likely remaining hot CLI path. Disable it
+    # in live polling first and keep the rest of the dashboard intact.
+    sessions = {"ok": True, "data": []}
     return {
         "health": health,
         "status": status,
@@ -395,10 +393,12 @@ def build_live_bundle(config):
 
 
 def build_cron_bundle(config):
-    cron_ttl = refresh_seconds(config, "cronMetadata", 90000)
+    cron_ttl = refresh_seconds(config, "cronMetadata", 180000)
     cron = cached_openclaw_command(config, "cron.list", ["cron", "list", "--all", "--json"], ttl_seconds=cron_ttl)
     cron_jobs = extract_cron_jobs(cron.get("data") if cron.get("ok") else [])
-    cron_jobs = enrich_cron_jobs_with_runs(config, cron_jobs[:6]) + cron_jobs[6:]
+    # Per-job cron runs enrichment is useful, but it can fan out into several
+    # expensive CLI calls during polling. Keep the cron list itself, but avoid
+    # enriching runs in the snapshot path on low-power machines.
     return {"cron": cron, "cronJobs": sort_cron_jobs(cron_jobs)}
 
 
@@ -415,11 +415,11 @@ def build_agents_bundle(config):
 
 
 def build_activity_bundle(config):
-    activity_ttl = refresh_seconds(config, "activity", 20000)
+    activity_ttl = refresh_seconds(config, "activity", 120000)
     logs = cached_openclaw_command(
         config,
         f"logs:{int(value_at(config, 'dashboard', 'activityItems') or 8)}",
-        ["logs", "--json", "--limit", str(int(value_at(config, "dashboard", "activityItems") or 8) * 3)],
+        ["logs", "--json", "--limit", str(int(value_at(config, "dashboard", "activityItems") or 8))],
         ttl_seconds=activity_ttl,
     )
     return {
@@ -429,15 +429,10 @@ def build_activity_bundle(config):
 
 
 def build_sessions_history_bundle(config):
-    sessions_ttl = refresh_seconds(config, "sessionsHistory", 45000)
-    sessions = cached_openclaw_command(
-        config,
-        "sessions.all",
-        ["sessions", "--all-agents", "--json"],
-        ttl_seconds=sessions_ttl,
-        include_remote=False,
-    )
-    return {"sessions": sessions}
+    # Full sessions history is the next most likely CPU-heavy CLI path after
+    # sessions --active. Keep it out of snapshot polling and let chat/history
+    # use their own on-demand paths instead.
+    return {"sessions": {"ok": True, "data": []}}
 
 
 def build_snapshot(config):
