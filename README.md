@@ -54,7 +54,7 @@ Typical layout:
 
 ## OpenClaw calls used by the dashboard
 
-The dashboard uses calls such as:
+The dashboard can use calls such as:
 
 - `openclaw health --json`
 - `openclaw status --json`
@@ -63,9 +63,11 @@ The dashboard uses calls such as:
 - `openclaw agents list --json`
 - `openclaw logs --json`
 
-Depending on the current UI mode and features in use, the backend may also read agent- and session-related data.
+Depending on the current UI mode and feature flags in `config.json`, the backend may also read agent- and session-related data.
 
-On lower-power machines, several of these pollers can now be toggled on or off in `config.json`.
+Several of the heavier pollers can be toggled on or off through the feature flags in `config.json`.
+
+On older or lower-power machines, continuous polling can cause noticeable CPU usage. The feature flags are intended to make that easier to tune.
 
 ## Why this architecture
 
@@ -84,7 +86,7 @@ This dashboard keeps the gateway behind the server and lets the backend perform 
 - Python 3
 - OpenClaw installed and working
 - OpenClaw Gateway running locally
-- A valid gateway token if your gateway uses `gateway.auth.token`
+- A valid gateway token only if your OpenClaw Gateway has auth enabled through `gateway.auth.token`
 
 ## Setup on Ubuntu
 
@@ -95,7 +97,7 @@ This dashboard keeps the gateway behind the server and lets the backend perform 
 cp config.example.json config.json
 ```
 
-3. Edit `config.json` and set the correct `gatewayUrl` and `token`.
+3. Edit `config.json` and set the correct `gatewayUrl`, and set `token` only if your gateway requires it.
 4. Start the dashboard:
 
 ```bash
@@ -138,6 +140,8 @@ http://127.0.0.1:3000
 ## Important note about the gateway token
 
 If your OpenClaw Gateway uses `gateway.auth.token`, the same token must be added to `config.json`.
+
+If gateway auth is disabled, the `token` field can be left empty.
 
 The dashboard uses this token only on the server side when calling OpenClaw through the local CLI and Gateway.
 
@@ -195,7 +199,7 @@ Fields:
 
 - `cliPath` = path or command name for the OpenClaw CLI
 - `gatewayUrl` = local gateway URL
-- `token` = gateway token
+- `token` = gateway token when gateway auth is enabled, otherwise can be empty
 - `timeoutMs` = timeout for OpenClaw calls
 - `pollIntervalMs` = base interval used by dashboard logic
 - `features` = optional polling feature flags for CPU-sensitive machines
@@ -246,6 +250,8 @@ Each card can be linked to a real OpenClaw agent with:
 - `name` = displayed agent name
 - `openclawId` = actual OpenClaw agent ID
 - `cronJobIds` = optional list of cron jobs associated with that card
+
+The example agent cards in `config.example.json` are just placeholders. Replace them with IDs and labels that match your own OpenClaw setup.
 
 ## Running as a systemd user service
 
