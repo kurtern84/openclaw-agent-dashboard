@@ -8,7 +8,25 @@
     "gatewayUrl": "ws://127.0.0.1:18789",
     "token": "SET_GATEWAY_TOKEN_HERE",
     "timeoutMs": 5000,
-    "pollIntervalMs": 5000
+    "pollIntervalMs": 20000,
+    "features": {
+      "statusPolling": false,
+      "presencePolling": false,
+      "activeSessionsPolling": false,
+      "sessionsHistoryPolling": false,
+      "cronRunsPolling": false,
+      "logsPolling": true
+    },
+    "refreshMs": {
+      "live": 20000,
+      "presence": 60000,
+      "activeSessions": 60000,
+      "activity": 120000,
+      "sessionsHistory": 180000,
+      "cronMetadata": 180000,
+      "agentsMetadata": 120000,
+      "cronRuns": 180000
+    }
   },
   "dashboard": {
     "title": "OpenClaw Agent Control",

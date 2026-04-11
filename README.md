@@ -65,6 +65,8 @@ The dashboard uses calls such as:
 
 Depending on the current UI mode and features in use, the backend may also read agent- and session-related data.
 
+On lower-power machines, several of these pollers can now be toggled on or off in `config.json`.
+
 ## Why this architecture
 
 OpenClaw Gateway uses WebSocket plus authentication in the connection flow. The gateway should therefore stay local and should not be exposed directly unless you explicitly want that.
@@ -156,7 +158,15 @@ Minimal example:
     "gatewayUrl": "ws://127.0.0.1:18789",
     "token": "SET_GATEWAY_TOKEN_HERE",
     "timeoutMs": 5000,
-    "pollIntervalMs": 5000
+    "pollIntervalMs": 20000,
+    "features": {
+      "statusPolling": false,
+      "presencePolling": false,
+      "activeSessionsPolling": false,
+      "sessionsHistoryPolling": false,
+      "cronRunsPolling": false,
+      "logsPolling": true
+    }
   }
 }
 ```
@@ -188,6 +198,32 @@ Fields:
 - `token` = gateway token
 - `timeoutMs` = timeout for OpenClaw calls
 - `pollIntervalMs` = base interval used by dashboard logic
+- `features` = optional polling feature flags for CPU-sensitive machines
+- `refreshMs` = per-section refresh timing
+
+### `openclaw.features`
+
+These booleans let you choose which heavier snapshot pollers should run continuously.
+
+Recommended low-CPU defaults:
+
+- `statusPolling: false`
+- `presencePolling: false`
+- `activeSessionsPolling: false`
+- `sessionsHistoryPolling: false`
+- `cronRunsPolling: false`
+- `logsPolling: true`
+
+What they control:
+
+- `statusPolling` = enables `openclaw status --json`
+- `presencePolling` = enables `openclaw system presence --json`
+- `activeSessionsPolling` = enables active sessions polling
+- `sessionsHistoryPolling` = enables full local sessions history polling
+- `cronRunsPolling` = enriches cron jobs with recent run details
+- `logsPolling` = enables `openclaw logs --json` for the activity feed
+
+If a feature is disabled, the dashboard falls back to lighter snapshot data instead of repeatedly spawning the related CLI call.
 
 ### `dashboard`
 

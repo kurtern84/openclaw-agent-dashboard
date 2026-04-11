@@ -71,6 +71,14 @@ DEFAULT_CONFIG = {
         "token": "",
         "timeoutMs": 5000,
         "pollIntervalMs": 20000,
+        "features": {
+            "statusPolling": False,
+            "presencePolling": False,
+            "activeSessionsPolling": False,
+            "sessionsHistoryPolling": False,
+            "cronRunsPolling": False,
+            "logsPolling": True,
+        },
         "refreshMs": {
             "live": 20000,
             "presence": 60000,
@@ -101,6 +109,13 @@ def refresh_seconds(config, key, default_ms):
         return max(int(refresh_ms or default_ms) / 1000.0, 1.0)
     except (TypeError, ValueError):
         return max(default_ms / 1000.0, 1.0)
+
+
+def feature_enabled(config, key, default=False):
+    value = value_at(config, "openclaw", "features", key)
+    if value is None:
+        return default
+    return bool(value)
 
 
 def iso_now():
@@ -373,17 +388,32 @@ def build_live_bundle(config):
     live_ttl = refresh_seconds(config, "live", 20000)
 
     health = cached_openclaw_command(config, "health", ["health", "--json"], ttl_seconds=live_ttl)
-    # Keep status out of the live polling path as well. Health is enough for
-    # the dashboard's core gateway-online signal, and status appears to be one
-    # of the last recurring CLI calls still spawning hot openclaw processes.
-    status = {"ok": True, "data": {}}
-    # Presence is best-effort only. On this machine the `openclaw system`
-    # subprocess appears to be the main CPU/temperature offender, so keep
-    # presence disabled in the live path and fall back to an empty list.
-    presence = {"ok": True, "data": []}
-    # sessions --active is the most likely remaining hot CLI path. Disable it
-    # in live polling first and keep the rest of the dashboard intact.
-    sessions = {"ok": True, "data": []}
+    if feature_enabled(config, "statusPolling", default=False):
+        status = cached_openclaw_command(config, "status", ["status", "--json"], ttl_seconds=live_ttl)
+    else:
+        status = {"ok": True, "data": {}}
+
+    if feature_enabled(config, "presencePolling", default=False):
+        presence = cached_openclaw_command(
+            config,
+            "system.presence",
+            ["system", "presence", "--json"],
+            ttl_seconds=refresh_seconds(config, "presence", 60000),
+            include_remote=False,
+        )
+    else:
+        presence = {"ok": True, "data": []}
+
+    if feature_enabled(config, "activeSessionsPolling", default=False):
+        sessions = cached_openclaw_command(
+            config,
+            "sessions.active",
+            ["sessions", "--active", "--json"],
+            ttl_seconds=refresh_seconds(config, "activeSessions", 60000),
+            include_remote=False,
+        )
+    else:
+        sessions = {"ok": True, "data": []}
     return {
         "health": health,
         "status": status,
@@ -396,9 +426,8 @@ def build_cron_bundle(config):
     cron_ttl = refresh_seconds(config, "cronMetadata", 180000)
     cron = cached_openclaw_command(config, "cron.list", ["cron", "list", "--all", "--json"], ttl_seconds=cron_ttl)
     cron_jobs = extract_cron_jobs(cron.get("data") if cron.get("ok") else [])
-    # Per-job cron runs enrichment is useful, but it can fan out into several
-    # expensive CLI calls during polling. Keep the cron list itself, but avoid
-    # enriching runs in the snapshot path on low-power machines.
+    if feature_enabled(config, "cronRunsPolling", default=False):
+        cron_jobs = enrich_cron_jobs_with_runs(config, cron_jobs[:6]) + cron_jobs[6:]
     return {"cron": cron, "cronJobs": sort_cron_jobs(cron_jobs)}
 
 
@@ -415,6 +444,9 @@ def build_agents_bundle(config):
 
 
 def build_activity_bundle(config):
+    if not feature_enabled(config, "logsPolling", default=True):
+        return {"logs": {"ok": True, "data": []}, "activity": []}
+
     activity_ttl = refresh_seconds(config, "activity", 120000)
     logs = cached_openclaw_command(
         config,
@@ -429,10 +461,17 @@ def build_activity_bundle(config):
 
 
 def build_sessions_history_bundle(config):
-    # Full sessions history is the next most likely CPU-heavy CLI path after
-    # sessions --active. Keep it out of snapshot polling and let chat/history
-    # use their own on-demand paths instead.
-    return {"sessions": {"ok": True, "data": []}}
+    if not feature_enabled(config, "sessionsHistoryPolling", default=False):
+        return {"sessions": {"ok": True, "data": []}}
+
+    sessions = cached_openclaw_command(
+        config,
+        "sessions.all",
+        ["sessions", "--all-agents", "--json"],
+        ttl_seconds=refresh_seconds(config, "sessionsHistory", 180000),
+        include_remote=False,
+    )
+    return {"sessions": sessions}
 
 
 def build_snapshot(config):
