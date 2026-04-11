@@ -70,11 +70,11 @@ DEFAULT_CONFIG = {
         "gatewayUrl": "ws://127.0.0.1:18789",
         "token": "",
         "timeoutMs": 5000,
-        "pollIntervalMs": 10000,
+        "pollIntervalMs": 15000,
         "refreshMs": {
-            "live": 5000,
-            "presence": 8000,
-            "activeSessions": 4000,
+            "live": 15000,
+            "presence": 60000,
+            "activeSessions": 10000,
             "activity": 20000,
             "sessionsHistory": 45000,
             "cronMetadata": 90000,
@@ -370,13 +370,15 @@ def fallback_activity(gateway_online, channels, cron_jobs, agents_items):
 
 
 def build_live_bundle(config):
-    live_ttl = refresh_seconds(config, "live", 5000)
-    presence_ttl = refresh_seconds(config, "presence", 8000)
-    active_sessions_ttl = refresh_seconds(config, "activeSessions", 4000)
+    live_ttl = refresh_seconds(config, "live", 15000)
+    active_sessions_ttl = refresh_seconds(config, "activeSessions", 10000)
 
     health = cached_openclaw_command(config, "health", ["health", "--json"], ttl_seconds=live_ttl)
     status = cached_openclaw_command(config, "status", ["status", "--json"], ttl_seconds=live_ttl)
-    presence = cached_openclaw_command(config, "presence", ["system", "presence", "--json"], ttl_seconds=presence_ttl)
+    # Presence is best-effort only. On this machine the `openclaw system`
+    # subprocess appears to be the main CPU/temperature offender, so keep
+    # presence disabled in the live path and fall back to an empty list.
+    presence = {"ok": True, "data": []}
     sessions = cached_openclaw_command(
         config,
         "sessions.active",
