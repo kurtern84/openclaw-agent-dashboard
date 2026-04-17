@@ -2,7 +2,9 @@
 
 A lightweight local dashboard for OpenClaw Gateway, designed to run on the same Ubuntu server as OpenClaw.
 
-This project works as an internal control panel for agents, cron jobs, transports, live activity, and agent chat.
+This project works as an **internal control panel** for agents, cron jobs, transports, live activity, and agent interaction.
+
+---
 
 ## Screenshots
 
@@ -15,46 +17,114 @@ This project works as an internal control panel for agents, cron jobs, transport
 ### Agent Chat
 ![OpenClaw Dashboard Agent Chat](docs/images/dashboard-chat.png)
 
+---
+
+## Overview
+
+OpenClaw Dashboard gives you:
+
+- A **live overview** of your system
+- A **visual representation** of agents and flows
+- A way to **interact directly with agents**
+- A **local-first control surface** for OpenClaw
+
+This is not just monitoring.  
+It is designed to give you **visibility + control** in one place.
+
+---
+
 ## What it does
 
 - Reads local settings from `config.json`
-- Fetches status and metadata from OpenClaw through the local CLI and Gateway
-- Displays agents, cron jobs, transports, activity, and chat in a local web UI
+- Fetches status and metadata from OpenClaw via CLI and Gateway
+- Displays agents, cron jobs, transports, activity, and chat
 - Supports both `Scene` and `Hierarchy` views
-- Pushes updates to the frontend with SSE
-- Keeps the OpenClaw gateway token on the server side instead of exposing it in the browser
-- Works over localhost or an internal LAN
+- Pushes updates to the frontend using SSE
+- Keeps the OpenClaw gateway token server-side
+- Works over localhost or internal LAN
 
-## Features
+---
 
-- Live gateway and agent overview
-- Agent cards with custom labels and display names
-- Scene view for topology-style monitoring and manual placement
-- Hierarchy view for structured org-chart style layouts
-- Cron job visibility and transport mapping
-- Transport visibility for integrations such as WhatsApp and Telegram
-- Built-in agent chat panel
-- Config-driven labels and mapping
-- Local-first architecture with OpenClaw kept behind the dashboard backend
+## Key Features
+
+### Interactive Agent Control
+- Click any agent to open a session
+- Chat directly with agents
+- View last output, observations and suggestions
+
+### Scene View (Visual Layout)
+- Drag & drop agents freely
+- Organize your system visually
+- Build your own mental model of the system
+
+### Hierarchy View (Structured Layout)
+- See relationships between:
+  - Main agent
+  - Sub-agents
+  - Cron jobs
+  - Transports
+
+### Real-Time Updates
+- Server-Sent Events (SSE)
+- Live updates without page reload
+- Recent activity timeline
+
+### Cron & Automation Visibility
+- See upcoming jobs
+- Track scheduling
+- Understand flow from agent → cron → transport
+
+### Transport Visibility
+- Supports integrations like Telegram and WhatsApp
+- See where outputs are delivered
+- Confirm system activity
+
+---
+
+## What you can monitor
+
+- Agent status (sleeping / active)
+- Last task and output
+- Cron schedules
+- Gateway connection
+- Recent activity
+- Errors (if any)
+
+---
+
+## What you can control
+
+- Open agent sessions
+- Send messages directly to agents
+- Trigger behavior through interaction
+- Organize layout in Scene view
+
+---
 
 ## How it works
 
 The dashboard runs as its own local web server on port `3000`.
 
-OpenClaw Gateway runs separately and typically listens locally on:
+OpenClaw Gateway runs separately and typically listens on:
 
 - `127.0.0.1:18789`
 
-The dashboard talks to OpenClaw on the server side through CLI and Gateway calls. That means the gateway token is never sent to the frontend.
+The dashboard communicates with OpenClaw through the backend using CLI and Gateway calls.
+
+This means:
+- No direct frontend → gateway communication
+- Gateway token stays server-side
 
 Typical layout:
 
 - Dashboard: `0.0.0.0:3000` or `127.0.0.1:3000`
 - OpenClaw Gateway: `127.0.0.1:18789`
 
-## OpenClaw calls used by the dashboard
+---
 
-The dashboard can use calls such as:
+## OpenClaw calls used
+
+The dashboard may use:
 
 - `openclaw health --json`
 - `openclaw status --json`
@@ -63,279 +133,36 @@ The dashboard can use calls such as:
 - `openclaw agents list --json`
 - `openclaw logs --json`
 
-Depending on the current UI mode and feature flags in `config.json`, the backend may also read agent- and session-related data.
+Some heavier pollers can be toggled via `config.json`.
 
-Several of the heavier pollers can be toggled on or off through the feature flags in `config.json`.
+On lower-power machines, continuous polling may increase CPU usage.
 
-On older or lower-power machines, continuous polling can cause noticeable CPU usage. The feature flags are intended to make that easier to tune.
+---
 
 ## Why this architecture
 
-OpenClaw Gateway uses WebSocket plus authentication in the connection flow. The gateway should therefore stay local and should not be exposed directly unless you explicitly want that.
+OpenClaw Gateway uses WebSocket + authentication and should remain local.
 
-This dashboard keeps the gateway behind the server and lets the backend perform the OpenClaw calls. That gives:
+This dashboard keeps the gateway behind the backend, which gives:
 
-- a simpler frontend
-- less token exposure
-- cleaner separation between dashboard and gateway
-- safer internal operation
+- Simpler frontend
+- No token exposure
+- Clear separation of responsibilities
+- Safer operation
+
+---
 
 ## Requirements
 
 - Ubuntu server
 - Python 3
-- OpenClaw installed and working
+- OpenClaw installed and running
 - OpenClaw Gateway running locally
-- A valid gateway token only if your OpenClaw Gateway has auth enabled through `gateway.auth.token`
+
+---
 
 ## Setup on Ubuntu
 
-1. Copy this project folder to your server.
-2. Create your local config:
-
 ```bash
-cp config.example.json config.json
-```
-
-3. Edit `config.json` and set the correct `gatewayUrl`, and set `token` only if your gateway requires it.
-4. Start the dashboard:
-
-```bash
-cd /path/to/Openclaw_dashboard
-python3 server.py
-```
-
-## Access options
-
-### Localhost access
-
-If the dashboard runs on localhost:
-
-```text
-http://127.0.0.1:3000
-```
-
-### Internal LAN access
-
-If the dashboard listens on `0.0.0.0` and is reachable on your internal network:
-
-```text
-http://SERVER_IP:3000
-```
-
-### SSH tunnel access
-
-If you prefer SSH forwarding:
-
-```bash
-ssh -L 18789:127.0.0.1:18789 -L 3000:127.0.0.1:3000 USER@SERVER_IP
-```
-
-Then open:
-
-```text
-http://127.0.0.1:3000
-```
-
-## Important note about the gateway token
-
-If your OpenClaw Gateway uses `gateway.auth.token`, the same token must be added to `config.json`.
-
-If gateway auth is disabled, the `token` field can be left empty.
-
-The dashboard uses this token only on the server side when calling OpenClaw through the local CLI and Gateway.
-
-## Example config
-
-See `config.example.json` for the full template.
-
-Minimal example:
-
-```json
-{
-  "server": {
-    "host": "0.0.0.0",
-    "port": 3000
-  },
-  "openclaw": {
-    "cliPath": "openclaw",
-    "gatewayUrl": "ws://127.0.0.1:18789",
-    "token": "SET_GATEWAY_TOKEN_HERE",
-    "timeoutMs": 5000,
-    "pollIntervalMs": 20000,
-    "features": {
-      "statusPolling": false,
-      "presencePolling": false,
-      "activeSessionsPolling": false,
-      "sessionsHistoryPolling": false,
-      "cronRunsPolling": false,
-      "logsPolling": true
-    }
-  }
-}
-```
-
-## What the config controls
-
-### `server`
-
-Controls where the dashboard listens.
-
-Examples:
-
-- `127.0.0.1` = local only
-- `0.0.0.0` = reachable on internal network interfaces
-
-Fields:
-
-- `host`
-- `port`
-
-### `openclaw`
-
-Controls how the dashboard talks to OpenClaw.
-
-Fields:
-
-- `cliPath` = path or command name for the OpenClaw CLI
-- `gatewayUrl` = local gateway URL
-- `token` = gateway token when gateway auth is enabled, otherwise can be empty
-- `timeoutMs` = timeout for OpenClaw calls
-- `pollIntervalMs` = base interval used by dashboard logic
-- `features` = optional polling feature flags for CPU-sensitive machines
-- `refreshMs` = per-section refresh timing
-
-### `openclaw.features`
-
-These booleans let you choose which heavier snapshot pollers should run continuously.
-
-Recommended low-CPU defaults:
-
-- `statusPolling: false`
-- `presencePolling: false`
-- `activeSessionsPolling: false`
-- `sessionsHistoryPolling: false`
-- `cronRunsPolling: false`
-- `logsPolling: true`
-
-What they control:
-
-- `statusPolling` = enables `openclaw status --json`
-- `presencePolling` = enables `openclaw system presence --json`
-- `activeSessionsPolling` = enables active sessions polling
-- `sessionsHistoryPolling` = enables full local sessions history polling
-- `cronRunsPolling` = enriches cron jobs with recent run details
-- `logsPolling` = enables `openclaw logs --json` for the activity feed
-
-If a feature is disabled, the dashboard falls back to lighter snapshot data instead of repeatedly spawning the related CLI call.
-
-### `dashboard`
-
-Controls labels, visual settings, and how cards connect to OpenClaw data.
-
-Fields:
-
-- `title` = page title
-- `subtitle` = page subtitle
-- `activityItems` = number of activity items to show
-- `whatsapp.cronJobIds` = cron jobs linked to the WhatsApp transport node
-- `agentCards` = cards shown in the dashboard UI
-
-### `agentCards`
-
-Each card can be linked to a real OpenClaw agent with:
-
-- `id` = local dashboard ID
-- `label` = card label in the UI
-- `name` = displayed agent name
-- `openclawId` = actual OpenClaw agent ID
-- `cronJobIds` = optional list of cron jobs associated with that card
-
-The example agent cards in `config.example.json` are just placeholders. Replace them with IDs and labels that match your own OpenClaw setup.
-
-## Running as a systemd user service
-
-Example service file:
-
-```ini
-[Unit]
-Description=OpenClaw Dashboard
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/openclaw-dashboard
-ExecStart=/usr/bin/python3 /opt/openclaw-dashboard/server.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-```
-
-## Example installation as a user service
-
-Create the service file:
-
-```bash
-mkdir -p ~/.config/systemd/user
-nano ~/.config/systemd/user/openclaw-dashboard.service
-```
-
-Reload and start it:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable openclaw-dashboard.service
-systemctl --user start openclaw-dashboard.service
-```
-
-Check status:
-
-```bash
-systemctl --user status openclaw-dashboard.service --no-pager -l
-```
-
-If you want user services to survive reboot without requiring an active login session:
-
-```bash
-sudo loginctl enable-linger $USER
-```
-
-## Security principles
-
-- The dashboard may be exposed internally if needed
-- OpenClaw Gateway should remain localhost-only unless you explicitly choose otherwise
-- This project is intended as an internal control panel
-- Do not put the gateway token into frontend code
-- Do not expose OpenClaw Gateway directly unless you really need it
-- Internal VLAN or network segmentation is still recommended
-
-## Typical use case
-
-This project fits setups where you want:
-
-- a simpler overview than the default OpenClaw UI
-- custom-named agent cards
-- visibility into agents, cron jobs, transports, and live activity
-- scene- or hierarchy-based visualization
-- local agent chat in the same dashboard
-- a config-driven control panel without extra infrastructure
-
-## Roadmap ideas
-
-- real parent/child support in hierarchy view
-- child agent grouping under manager agents
-- manual layout overrides through `config.json`
-- richer transport mapping
-- better scene persistence
-- optional auth layer for internal LAN deployments
-- cleaner packaging for public GitHub release
-
-## Notes
-
-- This project was built for a real local OpenClaw setup and can be adapted through `config.json`
-- Dashboard behavior depends on your own OpenClaw agents, cron jobs, and transports
-- Scene and hierarchy behavior, labels, and transport mapping are driven by config plus live OpenClaw data
-
-Shared as-is. If it is useful to others, great. Bug reports and reasonable improvements are welcome, but the project follows my own use case and priorities.
+git clone https://github.com/kurtern84/openclaw-agent-dashboard.git
+cd openclaw-agent-dashboard
